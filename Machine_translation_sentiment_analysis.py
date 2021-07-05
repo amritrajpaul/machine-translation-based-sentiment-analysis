@@ -11,6 +11,7 @@ import quandl
 import sys
 import xlwt
 import openpyxl
+import boto3
 
 class MT_Sentiment_Analyser:
     ''' CAN INCREASE SCROLL TIME THUS NUMBER OF ARTICLES : m = MT_Sentiment_Analyser(['सेंसेक्स'] ,scroll = 10)
@@ -39,13 +40,15 @@ class MT_Sentiment_Analyser:
             t_hl_score.append(vader.polarity_scores(t_hl)['compound'])
             t_art_score.append(mean(t_para_score))
             #f = lambda x:vader.polarity_scores(x)['compound']
+            sys.stdout.write('\rScored Articles: {}/{} ...{} sec\n'.format(index+1,len(hin_eng_df.values),(time.time() - self.stime)))
+            sys.stdout.flush()
         hin_eng_df['para_avg_Senti_Score'] = t_art_score
         hin_eng_df['headline_Senti_Score'] = t_hl_score
-        data = quandl.get("BSE/SENSEX", authtoken="1SnsWfT7hPSiUcZumsa1",start_date = hin_eng_df.index.date[-1],end_date = hin_eng_df.index.date[0])
-        data['sensex_open_to_close_price'] = ((data['Close'] - data['Open'])/data['Open'] )*100
+        #data = quandl.get("BSE/SENSEX", authtoken="xxxxxxxxxxxxxxx",start_date = hin_eng_df.index.date[-1],end_date = hin_eng_df.index.date[0])
+        #data['sensex_open_to_close_price'] = ((data['Close'] - data['Open'])/data['Open'] )*100
         hin_eng_df.to_excel('SentimentScoreForSensexV2.xlsx', sheet_name='Sheet1', index=True, encoding=None)
-        data.to_excel('Sensex_dataV2.xlsx', sheet_name='Sheet1', index=True, encoding=None)
-        print("\n2 : xls file is successfully created! named : SentimentScoreForSensexV2.xls , Sensex_dataV2.xls")
+        #data.to_excel('Sensex_dataV2.xlsx', sheet_name='Sheet1', index=True, encoding=None)
+        print("\n1 : xls file is successfully created! named : SentimentScoreForSensexV2.xlsx")
         print(hin_eng_df)
         
         
@@ -74,7 +77,8 @@ class MT_Sentiment_Analyser:
 
            issue: Has a inbuilt timeout limit; temp solution: Try again in an hour; '''
         #translate_text = translator.translate('this great world',lang_tgt='bn')  
-        translator = google_translator(url_suffix=['translate.google.com','translate.google.co.in'],timeout=15,proxies={'http':'209.127.191.180:9279'})
+        #translator = google_translator(url_suffix=['translate.google.com','translate.google.co.in'],timeout=15,proxies={'http':'209.127.191.180:9279'})
+        translate = boto3.client(service_name='translate')#aws Translator for bulk process
         saved_translated_articles = []
         saved_translated_headlines = []
         dates = []
@@ -82,13 +86,15 @@ class MT_Sentiment_Analyser:
             translated_article = []
             date = df_section.index[i]
             hl,art = row
+            #saved_translated_articles.append(translate.translate_text(Text=art,SourceLanguageCode="hi", TargetLanguageCode="en")['TranslatedText'])
             for para in art:
-                translated_article.append(translator.translate(para))
+                translated_article.append(translate.translate_text(Text=para,SourceLanguageCode="hi", TargetLanguageCode="en")['TranslatedText'])
                 #time.sleep(2)
-            saved_translated_headlines.append(translator.translate(hl))
             saved_translated_articles.append(translated_article)
+            saved_translated_headlines.append(translate.translate_text(Text=hl,SourceLanguageCode="hi", TargetLanguageCode="en")['TranslatedText'])
+            #saved_translated_articles.append(translated_article)
             dates.append(date)
-            sys.stdout.write('\rTranslated: {}/{} ...{} sec'.format(i+1,len(df_section),(time.time() - self.stime)))
+            sys.stdout.write('\rTranslated Headline&Articles: {}/{} ...{} sec\n'.format(i+1,len(df_section),(time.time() - self.stime)))
             sys.stdout.flush()
         dic = {'Translated_Articles': saved_translated_articles,'Translated_Headlines': saved_translated_headlines}
         df = pd.DataFrame(dic,index = dates)
@@ -103,21 +109,30 @@ class MT_Sentiment_Analyser:
         print("Begun extracting each article from fitered links --- %s seconds ---" % (time.time() - self.stime))
         self.saved_articles = []
         self.saved_article_dates =[]
+        art_counter = 0
         for link in links:#saved_requestable_links:
-            article = []
-            article_content = requests.get(link).content
-            article_soup = BeautifulSoup(article_content,'html.parser')
-            paras = article_soup.findAll("p",{'style':"word-break:break-word"})
-            dateandtime = article_soup.find("meta", {"property": "article:published_time"}).attrs['content']
-            dateandtime = dateandtime[:-6]
-            for para in paras:
-                #article = ''.join(para.get_text())
-                article.append(para.get_text())
-            self.saved_articles.append(article)
-            date_time_obj = datetime.datetime.strptime(dateandtime, '%Y-%m-%dT%H:%M:%S')
-            self.saved_article_dates.append(date_time_obj)
+            try:
+                article = []
+                article_content = requests.get(link).content
+                article_soup = BeautifulSoup(article_content,'html.parser')
+                paras = article_soup.findAll("p",{'style':"word-break:break-word"})
+                dateandtime = article_soup.find("meta", {"property": "article:published_time"}).attrs['content']
+                dateandtime = dateandtime[:-6]
+                for para in paras:
+                    #article = ''.join(para.get_text())
+                    article.append(para.get_text())
+                self.saved_articles.append(article)
+                date_time_obj = datetime.datetime.strptime(dateandtime, '%Y-%m-%dT%H:%M:%S')
+                self.saved_article_dates.append(date_time_obj)
+                art_counter = art_counter + 1
+                sys.stdout.write('\rArticles Parsed : {}/{} ...Time Elapsed:{} sec\n'.format(art_counter,len(links),(time.time() - self.stime)))
+                sys.stdout.flush()
+            except Exception as e:
+                print('Excepion Handled while Parsing article handled ! ',e)
+                saved_articles.append(' ')
         dic = {'Headlines':self.saved_links_title,'Articles':self.saved_articles}
         hin_df = pd.DataFrame(dic,index = self.saved_article_dates)
+        hin_df.index.name = 'Published_date_time'
         print("Done! --- %s seconds ---" % (time.time() - self.stime))
         self.translator_hack(hin_df)
 
@@ -160,5 +175,5 @@ class MT_Sentiment_Analyser:
         self.parse_article(self.saved_requestable_links)
 
 
-m = MT_Sentiment_Analyser(['सेंसेक्स'],scroll = 50)#'निफ्टी','टाटा स्टील','यस बैंक','5G'])#'बैंकिंग','टाटा डिजिटल',
+m = MT_Sentiment_Analyser(['सेंसेक्स'],scroll = 10)#'निफ्टी','टाटा स्टील','यस बैंक','5G'])#'बैंकिंग','टाटा डिजिटल',
 m.parse()
