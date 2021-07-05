@@ -1,0 +1,2 @@
+# machine-translation-based-sentiment-analysis
+This program uses 'hindi-news-scraper' to scrape Hindi Financial news and translate to English text using google and aws translator, then performs sentiment analysis using NLTK-VADER sentiment analyser to give out an excel(.xlsx) file with Articles, Headlines, Translated Articles, Translated Headlines &amp; Sentiment Score of Translated Articles, Headlines.
